@@ -1,0 +1,98 @@
+# Tests CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+
+# Find GoogleTest
+find_package(GTest REQUIRED)
+
+# Test executable
+add_executable(LOBTests
+    test_order_book.cpp
+    test_signals.cpp
+    test_backtester.cpp
+    test_metrics.cpp
+)
+
+target_link_libraries(LOBTests
+    PRIVATE
+        LOB::Core
+        GTest::gtest
+        GTest::gtest_main
+        GTest::gmock
+        GTest::gmock_main
+)
+
+target_include_directories(LOBTests
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+)
+
+# Enable testing
+include(GoogleTest)
+gtest_discover_tests(LOBTests)
+
+# Add custom test targets
+add_custom_target(run_tests
+    COMMAND ${CMAKE_CTEST_COMMAND} --verbose
+    DEPENDS LOBTests
+    COMMENT "Running all tests"
+)
+
+# Memory check with valgrind (if available)
+find_program(VALGRIND_EXECUTABLE valgrind)
+if(VALGRIND_EXECUTABLE)
+    add_custom_target(test_memory
+        COMMAND ${VALGRIND_EXECUTABLE} 
+            --tool=memcheck 
+            --leak-check=full 
+            --show-leak-kinds=all 
+            --track-origins=yes 
+            --verbose 
+            --error-exitcode=1
+            $<TARGET_FILE:LOBTests>
+        DEPENDS LOBTests
+        COMMENT "Running tests with Valgrind memory check"
+    )
+endif()
+
+# Thread sanitizer test
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_executable(LOBTests_TSAN
+        test_order_book.cpp
+        test_signals.cpp
+        test_backtester.cpp
+        test_metrics.cpp
+    )
+    
+    target_link_libraries(LOBTests_TSAN
+        PRIVATE
+            LOB::Core
+            GTest::gtest
+            GTest::gtest_main
+    )
+    
+    target_compile_options(LOBTests_TSAN PRIVATE -fsanitize=thread -g)
+    target_link_options(LOBTests_TSAN PRIVATE -fsanitize=thread)
+    
+    add_custom_target(test_thread_safety
+        COMMAND $<TARGET_FILE:LOBTests_TSAN>
+        DEPENDS LOBTests_TSAN
+        COMMENT "Running tests with Thread Sanitizer"
+    )
+endif()
+
+# Coverage target (if enabled)
+if(LOB_ENABLE_COVERAGE)
+    include(CodeCoverage)
+    append_coverage_compiler_flags()
+    
+    setup_target_for_coverage_lcov(
+        NAME coverage
+        EXECUTABLE ctest
+        DEPENDENCIES LOBTests
+        EXCLUDE 
+            "/usr/*" 
+            "*/tests/*" 
+            "*/_deps/*"
+            "*/build/*"
+    )
+endif()

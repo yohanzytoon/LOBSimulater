@@ -1,0 +1,48 @@
+# Python bindings CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+
+find_package(pybind11 REQUIRED)
+
+# Create Python module
+pybind11_add_module(lob_backtester 
+    pybind_module.cpp
+)
+
+target_link_libraries(lob_backtester 
+    PRIVATE 
+        LOB::Core
+)
+
+target_include_directories(lob_backtester 
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+)
+
+# Set properties for Python module
+target_compile_definitions(lob_backtester 
+    PRIVATE 
+        VERSION_INFO=${PROJECT_VERSION}
+)
+
+# Enable modern C++ features
+target_compile_features(lob_backtester 
+    PRIVATE 
+        cxx_std_17
+)
+
+# Optimize for size in Release mode
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(lob_backtester PRIVATE -Os)
+endif()
+
+# Create setup.py for pip installation
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/setup.py.in
+    ${CMAKE_CURRENT_BINARY_DIR}/setup.py
+    @ONLY
+)
+
+# Install Python module
+install(TARGETS lob_backtester 
+    DESTINATION .
+)

@@ -1,0 +1,81 @@
+# Benchmarks CMakeLists.txt
+cmake_minimum_required(VERSION 3.20)
+
+# Find Google Benchmark
+find_package(benchmark REQUIRED)
+
+# Benchmark executable
+add_executable(LOBBenchmarks
+    bench_order_book.cpp
+    bench_signals.cpp
+    bench_backtester.cpp
+)
+
+target_link_libraries(LOBBenchmarks
+    PRIVATE
+        LOB::Core
+        benchmark::benchmark
+        benchmark::benchmark_main
+)
+
+target_include_directories(LOBBenchmarks
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+)
+
+# Ensure Release mode for benchmarks
+set_target_properties(LOBBenchmarks PROPERTIES
+    COMPILE_FLAGS "-O3 -DNDEBUG -march=native"
+)
+
+# Custom benchmark targets
+add_custom_target(run_benchmarks
+    COMMAND $<TARGET_FILE:LOBBenchmarks> 
+        --benchmark_format=console
+        --benchmark_out_format=json
+        --benchmark_out=benchmark_results.json
+        --benchmark_repetitions=3
+        --benchmark_report_aggregates_only=true
+    DEPENDS LOBBenchmarks
+    COMMENT "Running performance benchmarks"
+)
+
+# Profiling benchmarks with perf (Linux only)
+if(UNIX AND NOT APPLE)
+    find_program(PERF_EXECUTABLE perf)
+    if(PERF_EXECUTABLE)
+        add_custom_target(profile_benchmarks
+            COMMAND ${PERF_EXECUTABLE} record -g $<TARGET_FILE:LOBBenchmarks> 
+                --benchmark_filter="AddOrder"
+                --benchmark_min_time=5
+            DEPENDS LOBBenchmarks
+            COMMENT "Profiling benchmarks with perf"
+        )
+    endif()
+endif()
+
+# Memory profiling with Valgrind (if available)
+find_program(VALGRIND_EXECUTABLE valgrind)
+if(VALGRIND_EXECUTABLE)
+    add_custom_target(profile_memory
+        COMMAND ${VALGRIND_EXECUTABLE} 
+            --tool=massif 
+            --massif-out-file=massif.out.%p
+            $<TARGET_FILE:LOBBenchmarks>
+            --benchmark_filter="MemoryFootprint"
+            --benchmark_min_time=1
+        DEPENDS LOBBenchmarks
+        COMMENT "Memory profiling benchmarks with Valgrind Massif"
+    )
+endif()
+
+# Continuous benchmarking (for CI)
+add_custom_target(ci_benchmarks
+    COMMAND $<TARGET_FILE:LOBBenchmarks>
+        --benchmark_format=json
+        --benchmark_out=ci_benchmark_results.json
+        --benchmark_min_time=0.1
+        --benchmark_repetitions=1
+    DEPENDS LOBBenchmarks
+    COMMENT "Running CI benchmarks (fast mode)"
+)

@@ -1,0 +1,323 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint and Format Check
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install clang-format and clang-tidy
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format-14 clang-tidy-14
+        sudo ln -sf /usr/bin/clang-format-14 /usr/bin/clang-format
+        sudo ln -sf /usr/bin/clang-tidy-14 /usr/bin/clang-tidy
+
+    - name: Check formatting
+      run: |
+        find include src tests examples -name "*.cpp" -o -name "*.hpp" | xargs clang-format -n -Werror
+
+    - name: Run clang-tidy
+      run: |
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=Debug -DLOB_ENABLE_STATIC_ANALYSIS=ON ..
+        make -j$(nproc)
+        cd ..
+        find src -name "*.cpp" | xargs clang-tidy -p build
+
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Debug, Release]
+        compiler: [gcc, clang]
+        exclude:
+          - os: macos-latest
+            compiler: gcc
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.os }}, ${{ matrix.compiler }}, ${{ matrix.build_type }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup GCC
+      if: matrix.compiler == 'gcc' && matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-11 g++-11
+        echo "CC=gcc-11" >> $GITHUB_ENV
+        echo "CXX=g++-11" >> $GITHUB_ENV
+
+    - name: Setup Clang
+      if: matrix.compiler == 'clang'
+      run: |
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          sudo apt-get update
+          sudo apt-get install -y clang-14
+          echo "CC=clang-14" >> $GITHUB_ENV
+          echo "CXX=clang++-14" >> $GITHUB_ENV
+        else
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+        fi
+
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake \
+          ninja-build \
+          lcov \
+          python3 \
+          python3-dev \
+          python3-pip
+
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install cmake ninja lcov python3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy pandas matplotlib jupyter pytest
+
+    - name: Configure CMake
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DLOB_BUILD_TESTS=ON \
+          -DLOB_BUILD_BENCHMARKS=ON \
+          -DLOB_BUILD_PYTHON_BINDINGS=ON \
+          -DLOB_ENABLE_COVERAGE=${{ matrix.build_type == 'Debug' && matrix.compiler == 'gcc' && 'ON' || 'OFF' }}
+
+    - name: Build
+      run: cmake --build build --config ${{ matrix.build_type }} --parallel
+
+    - name: Test
+      working-directory: build
+      run: ctest --build-config ${{ matrix.build_type }} --parallel --output-on-failure
+
+    - name: Generate coverage report
+      if: matrix.build_type == 'Debug' && matrix.compiler == 'gcc' && matrix.os == 'ubuntu-latest'
+      working-directory: build
+      run: |
+        lcov --capture --directory . --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' '*/build/_deps/*' '*/tests/*' --output-file coverage_filtered.info
+        lcov --list coverage_filtered.info
+
+    - name: Upload coverage to Codecov
+      if: matrix.build_type == 'Debug' && matrix.compiler == 'gcc' && matrix.os == 'ubuntu-latest'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./build/coverage_filtered.info
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Run benchmarks
+      if: matrix.build_type == 'Release'
+      working-directory: build
+      run: |
+        ./bin/bench_order_book --benchmark_format=json --benchmark_out=benchmark_results.json || true
+
+    - name: Upload benchmark results
+      if: matrix.build_type == 'Release' && matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: build/benchmark_results.json
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    name: Sanitizers
+
+    strategy:
+      matrix:
+        sanitizer: [address, undefined, thread]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-14 cmake ninja-build
+
+    - name: Configure CMake
+      env:
+        CC: clang-14
+        CXX: clang++-14
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DLOB_BUILD_TESTS=ON \
+          -DLOB_BUILD_BENCHMARKS=OFF \
+          -DLOB_BUILD_PYTHON_BINDINGS=OFF \
+          -DLOB_ENABLE_SANITIZERS=ON \
+          -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer"
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Test with ${{ matrix.sanitizer }} sanitizer
+      working-directory: build
+      run: ctest --parallel --output-on-failure
+      env:
+        ASAN_OPTIONS: "detect_odr_violation=0:halt_on_error=1:abort_on_error=1"
+        UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1"
+        TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1"
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    name: Static Analysis
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          clang-14 \
+          clang-tidy-14 \
+          cppcheck \
+          cmake \
+          ninja-build
+
+    - name: Run cppcheck
+      run: |
+        cppcheck --enable=all --inconclusive --std=c++17 \
+          --suppress=missingIncludeSystem \
+          --suppress=unmatchedSuppression \
+          --suppress=unusedFunction \
+          -I include src/ 2>&1 | tee cppcheck-report.txt
+        
+    - name: Configure CMake for clang-tidy
+      env:
+        CC: clang-14
+        CXX: clang++-14
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+    - name: Build for clang-tidy
+      run: cmake --build build --parallel
+
+    - name: Run clang-tidy
+      run: |
+        find src -name "*.cpp" | \
+        xargs clang-tidy-14 -p build \
+          --checks='-*,bugprone-*,clang-analyzer-*,cppcoreguidelines-*,modernize-*,performance-*,portability-*,readability-*' \
+          --warnings-as-errors='' \
+          2>&1 | tee clang-tidy-report.txt
+
+    - name: Upload static analysis results
+      uses: actions/upload-artifact@v3
+      with:
+        name: static-analysis-reports
+        path: |
+          cppcheck-report.txt
+          clang-tidy-report.txt
+
+  valgrind:
+    runs-on: ubuntu-latest
+    name: Memory Check with Valgrind
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-11 g++-11 cmake ninja-build valgrind
+
+    - name: Configure CMake
+      env:
+        CC: gcc-11
+        CXX: g++-11
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DLOB_BUILD_TESTS=ON \
+          -DLOB_BUILD_BENCHMARKS=OFF \
+          -DLOB_BUILD_PYTHON_BINDINGS=OFF
+
+    - name: Build
+      run: cmake --build build --parallel
+
+    - name: Run tests with Valgrind
+      working-directory: build
+      run: |
+        ctest --parallel --output-on-failure \
+          --overwrite MemoryCheckCommand=valgrind \
+          --overwrite MemoryCheckCommandOptions="--tool=memcheck --leak-check=full --error-exitcode=1"
+
+  python-bindings:
+    runs-on: ubuntu-latest
+    name: Python Bindings Test
+
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-11 g++-11 cmake ninja-build
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install numpy pandas matplotlib pytest pybind11
+
+    - name: Build and test Python bindings
+      env:
+        CC: gcc-11
+        CXX: g++-11
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLOB_BUILD_PYTHON_BINDINGS=ON \
+          -DLOB_BUILD_TESTS=OFF \
+          -DLOB_BUILD_BENCHMARKS=OFF
+        cmake --build build --parallel
+        
+        # Install the Python module
+        cd bindings
+        pip install -e .
+        
+        # Test the bindings
+        python -c "import lob_backtester; print('Python bindings working!')"
