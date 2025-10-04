@@ -1,6 +1,7 @@
 # Python bindings CMakeLists.txt
 cmake_minimum_required(VERSION 3.20)
 
+
 find_package(pybind11 REQUIRED)
 
 # Create Python module
