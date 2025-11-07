@@ -94,7 +94,3 @@ lob-backtester/
 │   └── signals.md               # Details of microstructure signals
 └── data/                        # Placeholder for CSV data (not included)
 ```
-
-## License
-
-This project is licensed under the MIT License.  See the `LICENSE` file for details.
