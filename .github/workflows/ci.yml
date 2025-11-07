@@ -1,0 +1,39 @@
+name: ci
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3-dev python3-pip pybind11-dev cppcheck
+          pip3 install --upgrade pip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja pybind11 cppcheck
+      - name: Configure
+        run: cmake -S . -B build -G Ninja \
+              -DLOB_BUILD_TESTS=ON \
+              -DLOB_BUILD_BINDINGS=ON \
+              -DLOB_ENABLE_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build --config Release -j 3
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Run static analysis
+        run: |
+          cppcheck --enable=warning,performance,portability,style \
+                   --error-exitcode=1 --inline-suppr --std=c++17 \
+                   -I include src

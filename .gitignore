@@ -1,0 +1,22 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE and editor files
+.idea/
+.vscode/
+*~
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS/Windows artefacts
+.DS_Store
+Thumbs.db
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Compiled Python extension
+*.so

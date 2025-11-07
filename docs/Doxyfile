@@ -1,0 +1,6 @@
+PROJECT_NAME           = "LOB Backtester"
+OUTPUT_DIRECTORY       = docs/build
+GENERATE_XML           = NO
+RECURSIVE              = YES
+INPUT                  = include src
+EXTRACT_ALL            = YES

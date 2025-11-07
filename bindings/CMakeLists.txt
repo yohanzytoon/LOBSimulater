@@ -1,0 +1,10 @@
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(pybind11 CONFIG QUIET)
+if (NOT pybind11_FOUND)
+  message(STATUS "pybind11 not found via config; trying module mode")
+  find_package(pybind11 REQUIRED)
+endif()
+
+pybind11_add_module(lobpy bindings/pybind_module.cpp)
+target_link_libraries(lobpy PRIVATE lob)
+target_include_directories(lobpy PRIVATE ${CMAKE_SOURCE_DIR}/include)

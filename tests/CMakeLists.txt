@@ -1,0 +1,1 @@
+# tests targets are defined in top-level CMake; this exists for IDEs

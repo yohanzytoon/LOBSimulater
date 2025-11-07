@@ -1,0 +1,5 @@
+Checks: >
+  bugprone-*,performance-*,readability-*,modernize-*,-modernize-use-trailing-return-type,clang-analyzer-*
+WarningsAsErrors: 'bugprone-*,performance-*,readability-*'
+HeaderFilterRegex: 'include/lob/.*'
+AnalyzeTemporaryDtors: true

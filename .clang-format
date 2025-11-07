@@ -1,0 +1,7 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+AllowShortFunctionsOnASingleLine: Empty
+ReflowComments: true
+SortIncludes: true
+SpaceAfterCStyleCast: true
