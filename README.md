@@ -57,7 +57,6 @@ The `benchmarks/bench_order_book.cpp` program inserts a large number of orders i
 lob-backtester/
 ├── CMakeLists.txt               # Top‑level build system
 ├── README.md                    # This file
-├── LICENSE                      # MIT license
 ├── .gitignore                   # Ignore patterns
 ├── .clang-format                # clang‑format configuration
 ├── .clang-tidy                  # clang‑tidy configuration
